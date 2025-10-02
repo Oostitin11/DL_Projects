@@ -1,0 +1,7 @@
+path: ./children_and_adults_balanced
+train: images/train
+val: images/val
+
+names:
+  0: kid
+  1: adult
