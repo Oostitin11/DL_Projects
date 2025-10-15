@@ -1,0 +1,6 @@
+train: combined_dataset/images/train
+val: combined_dataset/images/val
+test: combined_dataset/images/test
+
+nc: 2
+names: ['kid', 'adult']
