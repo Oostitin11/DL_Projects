@@ -3,7 +3,7 @@ val: ../valid/images
 test: ../test/images
 
 nc: 2
-names: ['Adult', 'Child']
+names: ['Kid', 'Adult']
 
 roboflow:
   workspace: a-4euhx
