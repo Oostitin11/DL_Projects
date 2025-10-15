@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 2
+names: ['kid', 'adult']
+
+roboflow:
+  workspace: a-4euhx
+  project: children-vs-adults-yolo-my3ct
+  version: 4
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/a-4euhx/children-vs-adults-yolo-my3ct/dataset/4

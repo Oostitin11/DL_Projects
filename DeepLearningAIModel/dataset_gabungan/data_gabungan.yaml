@@ -1,0 +1,10 @@
+# Path relatif ke folder dataset gabungan Anda
+path: dataset_gabungan  # Pastikan path ini benar
+
+# Lokasi folder train dan valid di dalam 'path'
+train: images/train
+val: images/valid
+
+# Informasi kelas (pastikan ini sudah konsisten)
+nc: 2
+names: ['child', 'adult']
