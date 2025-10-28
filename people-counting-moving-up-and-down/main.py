@@ -2,16 +2,17 @@ import cv2
 import numpy as np
 from collections import OrderedDict
 from ultralytics import YOLO
+import time
 
 # ========================
-# Centroid Tracker
+# Centroid Tracker (stabil)
 # ========================
 class CentroidTracker:
-    def __init__(self, max_disappeared=50):
+    def __init__(self, max_disappeared=80):
         self.next_object_id = 0
         self.objects = OrderedDict()
         self.disappeared = OrderedDict()
-        self.labels = {}  # track label for each object_id
+        self.labels = {}
         self.max_disappeared = max_disappeared
 
     def register(self, centroid, label):
@@ -44,8 +45,7 @@ class CentroidTracker:
             rows = D.min(axis=1).argsort()
             cols = D.argmin(axis=1)[rows]
 
-            used_rows = set()
-            used_cols = set()
+            used_rows, used_cols = set(), set()
 
             for (row, col) in zip(rows, cols):
                 if row in used_rows or col in used_cols:
@@ -72,11 +72,11 @@ class CentroidTracker:
         return self.objects, self.labels
 
 
-
+# ========================
+# Load YOLO model
+# ========================
 model = YOLO("kdandadult-model.pt")
-
 CLASS_NAMES = ["Kid", "Adult"]
-
 
 cap = cv2.VideoCapture(0)  # webcam
 
@@ -84,32 +84,36 @@ frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 fps = int(cap.get(cv2.CAP_PROP_FPS)) if cap.get(cv2.CAP_PROP_FPS) > 0 else 20
 
+# Output video
 out = cv2.VideoWriter('people_counting_output.mp4',
                       cv2.VideoWriter_fourcc(*'mp4v'),
                       fps,
                       (frame_width, frame_height))
 
-
-counts = {
-    "Kid_in": 0,
-    "Kid_out": 0,
-    "Adult_in": 0,
-    "Adult_out": 0
-}
-
+# ========================
+# Variables
+# ========================
+counts = {"Kid_in": 0, "Kid_out": 0, "Adult_in": 0, "Adult_out": 0}
 ct = CentroidTracker()
 previous_x = {}
-line_position = frame_width // 2  # vertical middle line
+line_position = frame_width // 2  # vertical line
+
+# Untuk hindari hitungan ganda
+crossed_recently = {}
+
+# FPS counter
+prev_time = time.time()
 
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
         break
 
-    # Run YOLO detection
-    results = model(frame, conf=0.5)
-    centroids = []
-    labels = []
+    # ========================
+    # YOLO detection (tiap frame)
+    # ========================
+    results = model(frame, conf=0.4, iou=0.5, verbose=False)
+    centroids, labels = [], []
 
     for result in results:
         boxes = result.boxes.xyxy.cpu().numpy()
@@ -117,6 +121,8 @@ while cap.isOpened():
         classes = result.boxes.cls.cpu().numpy()
 
         for box, conf, cls in zip(boxes, confs, classes):
+            if conf < 0.4:
+                continue  # filter tambahan
             x1, y1, x2, y2 = map(int, box)
             cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
             centroids.append((cx, cy))
@@ -128,33 +134,61 @@ while cap.isOpened():
             cv2.putText(frame, display_text, (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-    # Update tracker with centroids + labels
+    # ========================
+    # Tracking update
+    # ========================
     objects, tracked_labels = ct.update(centroids, labels)
 
-    # Count logic per class
     for (object_id, centroid) in objects.items():
         current_x = centroid[0]
         label = CLASS_NAMES[tracked_labels[object_id]]
+        color = (255, 0, 0) if label == "Kid" else (0, 255, 255)
+
+        # Visualize ID
+        cv2.putText(frame, f"ID {object_id} ({label})", (centroid[0] - 30, centroid[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        cv2.circle(frame, centroid, 4, color, -1)
+
+        # ==============
+        # Count logic (stabil)
+        # ==============
         if object_id in previous_x:
             prev_x = previous_x[object_id]
-            if prev_x > line_position and current_x < line_position:
-                counts[f"{label}_out"] += 1
-                print(f"{label} {object_id} moved LEFT (keluar).")
-            elif prev_x < line_position and current_x > line_position:
-                counts[f"{label}_in"] += 1
-                print(f"{label} {object_id} moved RIGHT (masuk).")
+            now = time.time()
+            if now - crossed_recently.get(object_id, 0) > 1.5:  # tahan 1.5 detik sebelum bisa dihitung lagi
+                if prev_x > line_position and current_x < line_position:
+                    counts[f"{label}_out"] += 1
+                    crossed_recently[object_id] = now
+                elif prev_x < line_position and current_x > line_position:
+                    counts[f"{label}_in"] += 1
+                    crossed_recently[object_id] = now
         previous_x[object_id] = current_x
 
-    # Draw middle line
-    cv2.line(frame, (line_position, 0), (line_position, frame_height), (0, 0, 255), 2)
+    # Bersihkan previous_x untuk ID yang hilang
+    for oid in list(previous_x.keys()):
+        if oid not in objects:
+            previous_x.pop(oid, None)
+            crossed_recently.pop(oid, None)
 
-    # Show counts on screen
-    cv2.putText(frame, f"Kids In: {counts['Kid_in']}  Out: {counts['Kid_out']}", 
+    # ========================
+    # Draw line & text
+    # ========================
+    cv2.line(frame, (line_position, 0), (line_position, frame_height), (0, 0, 255), 2)
+    cv2.putText(frame, f"Kids In: {counts['Kid_in']}  Out: {counts['Kid_out']}",
                 (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-    cv2.putText(frame, f"Adults In: {counts['Adult_in']}  Out: {counts['Adult_out']}", 
+    cv2.putText(frame, f"Adults In: {counts['Adult_in']}  Out: {counts['Adult_out']}",
                 (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-    cv2.imshow("Kids & Adults Counting", frame)
+    # ========================
+    # FPS display
+    # ========================
+    curr_time = time.time()
+    fps_display = 1 / (curr_time - prev_time)
+    prev_time = curr_time
+    cv2.putText(frame, f"FPS: {fps_display:.2f}", (10, 150),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    cv2.imshow("Kids & Adults Counting (Stable)", frame)
     out.write(frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -163,6 +197,4 @@ while cap.isOpened():
 cap.release()
 out.release()
 cv2.destroyAllWindows()
-
 print("Final Counts:", counts)
-
