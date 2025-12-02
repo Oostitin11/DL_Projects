@@ -18,3 +18,7 @@ torchvision==0.20.1
 # Optional: GPU support
 # torch==2.1.0+cu118  # Uncomment for CUDA support
 # torchvision==0.16.0+cu118
+
+# Testing requirements
+pytest==7.4.3
+pytest-asyncio==0.21.1
